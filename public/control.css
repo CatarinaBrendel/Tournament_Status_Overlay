@@ -298,6 +298,22 @@ select option {
   padding: 8px;
   z-index: 30;
 }
+.ms-search-row {
+  padding: 6px 8px 8px 8px;
+}
+.ms-search {
+  width: 100%;
+  min-height: 36px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  outline: none;
+}
+.ms-search::placeholder { color: var(--muted); }
+.ms-search:focus { box-shadow: 0 0 0 4px rgba(124, 92, 255, 0.12); border-color: var(--primary); }
 .multiselect-menu .ms-item {
   display: flex;
   align-items: center;

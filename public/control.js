@@ -180,6 +180,15 @@
     const menu = participantsSelect && participantsSelect.querySelector('.multiselect-menu');
     if (!menu) return;
     menu.innerHTML = '';
+    // add search input at top
+    const searchRow = document.createElement('div');
+    searchRow.className = 'ms-search-row';
+    const searchInput = document.createElement('input');
+    searchInput.type = 'search';
+    searchInput.className = 'ms-search';
+    searchInput.placeholder = 'Search participants…';
+    searchRow.appendChild(searchInput);
+    menu.appendChild(searchRow);
     if (!evId) return;
     const ev = events.find(e => (e.id || e.slug || e.name) == evId);
     if (!ev) return;
@@ -218,6 +227,24 @@
       item.appendChild(cb);
       item.appendChild(span);
       menu.appendChild(item);
+    });
+    // filter logic: hide items that don't match the search
+    function filterItems() {
+      const q = (searchInput.value || '').trim().toLowerCase();
+      const items = Array.from(menu.querySelectorAll('.ms-item'));
+      items.forEach(it => {
+        const text = (it.textContent || '').toLowerCase();
+        const visible = q === '' || text.indexOf(q) !== -1;
+        it.style.display = visible ? '' : 'none';
+      });
+    }
+    searchInput.addEventListener('input', filterItems);
+    searchInput.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        const firstVisible = menu.querySelector('.ms-item:not([style*="display: none"]) .ms-checkbox');
+        if (firstVisible) firstVisible.focus();
+      }
     });
     // after building participant options, refresh selection display so labels show
     updateSelectionDisplay(selected);
@@ -310,7 +337,11 @@
       menu.setAttribute('aria-hidden', String(menu.hidden));
       // reflect open state on the toggle so the chevron can rotate
       toggle.classList.toggle('open', !menu.hidden);
-      if (!menu.hidden) menu.querySelector('.ms-checkbox')?.focus();
+      if (!menu.hidden) {
+        const search = menu.querySelector('.ms-search');
+        if (search) search.focus();
+        else menu.querySelector('.ms-checkbox')?.focus();
+      }
     });
     document.addEventListener('click', (ev) => {
       if (!container.contains(ev.target)) {

@@ -257,6 +257,41 @@ body {
   gap: 8px;
 }
 
+/* score-controls: a horizontal row beneath the score containing the status pill, counter and chevron */
+.score-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.25rem;
+  align-self: flex-end;
+  justify-content: flex-end;
+}
+.score-controls .status-pill {
+  margin: 0;
+}
+
+/* small badge showing which renderer/fallback produced the card (for debugging) */
+.card-source {
+  display: inline-block;
+  padding: 0.125rem 0.5rem;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.03);
+  color: var(--muted);
+  font-size: 0.625rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+}
+
+/* DQ styling */
+.status-dq {
+  background: rgba(255, 92, 122, 0.12);
+  color: var(--danger);
+  box-shadow: inset 0 0 0 1px rgba(255,92,122,0.18);
+}
+.match-dq::before {
+  background: var(--danger);
+}
+
 /* Player group (main + collapsed items) */
 .player-group {
   display: grid;
@@ -286,10 +321,12 @@ body {
   position: relative;
   cursor: pointer;
 }
-.player-group .main-slot .collapsed-count {
-  position: absolute;
-  top: 0.5rem;
-  right: 0.625rem;
+.card-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.card-actions .collapsed-count {
   background: rgba(0,0,0,0.35);
   color: var(--text);
   padding: 0.25rem 0.5rem;
@@ -297,17 +334,15 @@ body {
   font-weight: 800;
   font-size: 0.6875rem;
 }
-.player-group .main-slot .expand-chevron {
-  position: absolute;
-  top: 0.5rem;
-  right: 2.75rem;
+.card-actions .expand-chevron {
   width: 0.875rem;
   height: 0.875rem;
   color: var(--muted);
   transition: transform 180ms ease, color 180ms ease;
   pointer-events: none;
+  display: inline-block;
 }
-.player-group.expanded .main-slot .expand-chevron {
+.player-group.expanded .card-actions .expand-chevron {
   transform: rotate(180deg);
   color: var(--primary);
 }

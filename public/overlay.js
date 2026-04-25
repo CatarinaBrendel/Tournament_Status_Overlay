@@ -540,7 +540,18 @@
     const scoreCol = document.createElement('div');
     scoreCol.className = 'score-col';
     scoreCol.appendChild(scoreElement);
-    scoreCol.appendChild(statusPill);
+    // controls row under the score will be created only for the main card
+    const controlsRow = document.createElement('div');
+    controlsRow.className = 'score-controls';
+    controlsRow.appendChild(statusPill);
+    scoreCol.appendChild(controlsRow);
+    // detect disqualification markers and render a DQ status when present
+    const isDQ = /\b(dq|disqual|disqualified|forfeit)\b/i.test(String(safeScore)) || /\b(dq|disqual|disqualified|forfeit)\b/i.test(String(safeStatus));
+    if (isDQ) {
+      statusPill.textContent = 'DQ';
+      statusPill.classList.add('status-dq');
+      card.classList.add('match-dq');
+    }
 
     // Assemble card content
     card.appendChild(player);
@@ -565,14 +576,18 @@
       mainSlot.className = 'main-slot';
       const collapsed = document.createElement('div');
       collapsed.className = 'collapsed-list';
-      // append the main card
-      mainSlot.appendChild(card);
-      // collapsed count badge
-      const collapsedCount = document.createElement('span');
-      collapsedCount.className = 'collapsed-count';
-      collapsedCount.textContent = '0';
-      mainSlot.appendChild(collapsedCount);
-      // chevron visual
+    // append the main card
+    mainSlot.appendChild(card);
+    // create action controls only for the main card
+    (function attachMainActions(c) {
+      const scoreCol = c.querySelector('.score-col');
+      const controlsRow = scoreCol && scoreCol.querySelector('.score-controls');
+      if (!controlsRow) return;
+      const cardActions = document.createElement('div');
+      cardActions.className = 'card-actions';
+      const collapsedCountEl = document.createElement('span');
+      collapsedCountEl.className = 'collapsed-count';
+      collapsedCountEl.textContent = '0';
       const chevron = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
       chevron.setAttribute('viewBox', '0 0 24 24');
       chevron.setAttribute('class', 'expand-chevron');
@@ -580,7 +595,10 @@
       chevron.setAttribute('width', '14');
       chevron.setAttribute('height', '14');
       chevron.innerHTML = '<polyline points="6 9 12 15 18 9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>';
-      mainSlot.appendChild(chevron);
+      cardActions.appendChild(collapsedCountEl);
+      cardActions.appendChild(chevron);
+      controlsRow.appendChild(cardActions);
+    })(card);
 
       group.appendChild(mainSlot);
       group.appendChild(collapsed);
@@ -592,8 +610,9 @@
         if (e.target.closest('button') || e.target.closest('a')) return;
         const willExpand = !group.classList.contains('expanded');
         group.classList.toggle('expanded', willExpand);
-        // update collapsed count badge
-        collapsedCount.textContent = String(collapsed.children.length);
+        // update collapsed count badge (look inside main card for the element)
+        const collapsedCountEl = mainSlot.querySelector('.collapsed-count');
+        if (collapsedCountEl) collapsedCountEl.textContent = String(collapsed.children.length);
       });
     } else {
       // existing group: move current main into collapsed list, then set new card as main
@@ -603,6 +622,12 @@
         const oldMain = mainSlot.firstElementChild;
         // avoid duplicating if oldMain is same as new card (unlikely)
         if (oldMain !== card) {
+          // remove main-only actions from the old main so collapsed items don't show controls
+          const oldScoreCol = oldMain.querySelector && oldMain.querySelector('.score-col');
+          if (oldScoreCol) {
+            const oldActions = oldScoreCol.querySelector('.card-actions');
+            if (oldActions) oldActions.remove();
+          }
           // prepend old main into collapsed list so older items are deeper
           collapsed.insertBefore(oldMain, collapsed.firstChild);
         }
@@ -612,15 +637,19 @@
         // clear and append
         mainSlot.innerHTML = '';
         mainSlot.appendChild(card);
-        // recreate collapsed count and chevron if missing
-        let collapsedCountEl = mainSlot.querySelector('.collapsed-count');
-        if (!collapsedCountEl) {
-          collapsedCountEl = document.createElement('span');
+        // attach main-only actions to the new main card
+        (function attachMainActionsToNew(c) {
+          const scoreCol = c.querySelector('.score-col');
+          const controlsRow = scoreCol && scoreCol.querySelector('.score-controls');
+          if (!controlsRow) return;
+          // remove any existing actions first
+          const existing = controlsRow.querySelector('.card-actions');
+          if (existing) existing.remove();
+          const cardActions = document.createElement('div');
+          cardActions.className = 'card-actions';
+          const collapsedCountEl = document.createElement('span');
           collapsedCountEl.className = 'collapsed-count';
-          mainSlot.appendChild(collapsedCountEl);
-        }
-        collapsedCountEl.textContent = String(collapsed.children.length);
-        if (!mainSlot.querySelector('.expand-chevron')) {
+          collapsedCountEl.textContent = String(collapsed.children.length);
           const chevron = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
           chevron.setAttribute('viewBox', '0 0 24 24');
           chevron.setAttribute('class', 'expand-chevron');
@@ -628,8 +657,10 @@
           chevron.setAttribute('width', '14');
           chevron.setAttribute('height', '14');
           chevron.innerHTML = '<polyline points="6 9 12 15 18 9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>';
-          mainSlot.appendChild(chevron);
-        }
+          cardActions.appendChild(collapsedCountEl);
+          cardActions.appendChild(chevron);
+          controlsRow.appendChild(cardActions);
+        })(card);
       }
       // move group to top since it's the most recently updated for this participant
       insertGroupAtTop(group);
