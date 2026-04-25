@@ -1,0 +1,16 @@
+/* Transparent overlay suitable for OBS browser source */
+html,body { margin:0; height:100%; background: transparent; }
+body { font-family: system-ui, sans-serif; color: #fff; }
+.overlay { padding: 12px; background: transparent; }
+.player { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 14px; margin-bottom:12px; border-radius:10px; border:1px solid rgba(255,255,255,0.06); background: rgba(0,0,0,0.35); }
+.player .left { display:flex; align-items:center; gap:12px }
+.player .badge { background:#ff5a5f; color:#fff; padding:4px 8px; border-radius:8px; font-weight:700; font-size:12px; }
+.player .name { font-size:20px; font-weight:700 }
+.player .meta { font-size:13px; color:rgba(255,255,255,0.85) }
+.player .score { font-weight:800; min-width:84px; text-align:center }
+.small { font-size:12px; color:rgba(255,255,255,0.7) }
+
+/* Header: tournament title left, event name right */
+.overlay-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; }
+.overlay-title { font-size:18px; font-weight:800; margin:0; }
+.overlay-event { font-size:13px; color:rgba(255,255,255,0.85); opacity:0.9; }

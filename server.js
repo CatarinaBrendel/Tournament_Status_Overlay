@@ -31,10 +31,18 @@ const state = {
 state.eventDetails = {};
 
 function broadcast(message) {
-  const data = JSON.stringify(message);
-  wss.clients.forEach((client) => {
-    if (client.readyState === WebSocket.OPEN) client.send(data);
-  });
+  try {
+    const data = JSON.stringify(message);
+    // debug log when broadcasting updates
+    if (message && message.type === 'update') {
+      try { console.log('Broadcasting update: tournamentName=', state.tournamentName, 'eventName=', state.eventName, 'selectedParticipants=', (state.selectedParticipants || []).length); } catch (e) {}
+    }
+    wss.clients.forEach((client) => {
+      if (client.readyState === WebSocket.OPEN) client.send(data);
+    });
+  } catch (e) {
+    console.error('broadcast error', e && e.stack || e);
+  }
 }
 
 function buildParticipantToEntrant() {
@@ -70,6 +78,8 @@ wss.on('connection', (ws, req) => {
           console.log('Search result (summary):', Object.keys(res || {}));
           state.query = obj.payload;
           state.results = res;
+          // expose a simple tournamentName for clients
+          try { state.tournamentName = (res && res.tournament && res.tournament.name) ? String(res.tournament.name) : null; } catch(e) { state.tournamentName = null; }
           buildParticipantToEntrant();
           broadcast({ type: 'update', state });
         }).catch((err) => {
@@ -83,6 +93,15 @@ wss.on('connection', (ws, req) => {
         const ev = (obj.payload && obj.payload.event) || null;
         state.selectedParticipants = Array.isArray(sel) ? sel : [];
         state.selectedEvent = ev;
+        // try to resolve a human-friendly event name from current results
+        try {
+          state.eventName = null;
+          if (state.results && state.results.tournament) {
+            const evs = Array.isArray(state.results.tournament.events) ? state.results.tournament.events : ((state.results.tournament.events && state.results.tournament.events.nodes) || []);
+            const found = evs.find(x => x && (String(x.id) === String(ev) || x.slug === ev || x.name === ev));
+            if (found && found.name) state.eventName = String(found.name);
+          }
+        } catch (e) { state.eventName = state.eventName || null; }
         broadcast({ type: 'update', state });
         // fetch event details (sets/phaseGroups) asynchronously so overlay can render match info
         if (ev) {
@@ -90,6 +109,8 @@ wss.on('connection', (ws, req) => {
               if (details) {
                 state.eventDetails = state.eventDetails || {};
                 state.eventDetails[ev] = details;
+                // expose event name at top-level for clients
+                try { state.eventName = details && details.name ? String(details.name) : state.eventName || null; } catch(e) { /* ignore */ }
 
                 // Normalize sets into per-participant quick lookup for client simplicity
                 try {
