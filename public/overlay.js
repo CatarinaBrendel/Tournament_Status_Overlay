@@ -1,5 +1,6 @@
 (function () {
   const playersDiv = document.getElementById("players");
+  const headerContainer = document.getElementById("overlayHeader");
 
   const wsUrl =
     (location.protocol === "https:" ? "wss" : "ws") +
@@ -10,6 +11,7 @@
 
   function render(state) {
     playersDiv.innerHTML = "";
+    if (headerContainer) headerContainer.innerHTML = "";
 
     if (!state) return;
 
@@ -91,7 +93,12 @@
     header.appendChild(left);
     header.appendChild(right);
 
-    playersDiv.appendChild(header);
+    if (headerContainer) {
+      headerContainer.appendChild(header);
+    } else {
+      // fallback: append to playersDiv if header container missing
+      playersDiv.insertBefore(header, playersDiv.firstChild);
+    }
   }
 
   function resolveEventName(state) {
@@ -535,12 +542,98 @@
     scoreCol.appendChild(scoreElement);
     scoreCol.appendChild(statusPill);
 
-    // Append in column order: player | roundInfo | scoreCol
+    // Assemble card content
     card.appendChild(player);
     card.appendChild(roundInfo);
     card.appendChild(scoreCol);
 
-    playersDiv.appendChild(card);
+    // Group cards by participant so newest is the main card and older ones collapse beneath
+    const key = String(playerName || "Unknown");
+    const dataKey = encodeURIComponent(key);
+    let group = playersDiv.querySelector(`[data-player="${dataKey}"]`);
+    // helper to insert group at top (below header if present)
+    function insertGroupAtTop(g) {
+      // always insert at top of the players container
+      playersDiv.insertBefore(g, playersDiv.firstChild);
+    }
+
+    if (!group) {
+      group = document.createElement('div');
+      group.className = 'player-group';
+      group.dataset.player = dataKey;
+      const mainSlot = document.createElement('div');
+      mainSlot.className = 'main-slot';
+      const collapsed = document.createElement('div');
+      collapsed.className = 'collapsed-list';
+      // append the main card
+      mainSlot.appendChild(card);
+      // collapsed count badge
+      const collapsedCount = document.createElement('span');
+      collapsedCount.className = 'collapsed-count';
+      collapsedCount.textContent = '0';
+      mainSlot.appendChild(collapsedCount);
+      // chevron visual
+      const chevron = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      chevron.setAttribute('viewBox', '0 0 24 24');
+      chevron.setAttribute('class', 'expand-chevron');
+      chevron.setAttribute('aria-hidden', 'true');
+      chevron.setAttribute('width', '14');
+      chevron.setAttribute('height', '14');
+      chevron.innerHTML = '<polyline points="6 9 12 15 18 9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>';
+      mainSlot.appendChild(chevron);
+
+      group.appendChild(mainSlot);
+      group.appendChild(collapsed);
+      insertGroupAtTop(group);
+
+      // toggle expand/collapse when main slot is clicked
+      mainSlot.addEventListener('click', (e) => {
+        // ignore clicks on interactive elements inside the card
+        if (e.target.closest('button') || e.target.closest('a')) return;
+        const willExpand = !group.classList.contains('expanded');
+        group.classList.toggle('expanded', willExpand);
+        // update collapsed count badge
+        collapsedCount.textContent = String(collapsed.children.length);
+      });
+    } else {
+      // existing group: move current main into collapsed list, then set new card as main
+      const mainSlot = group.querySelector('.main-slot');
+      const collapsed = group.querySelector('.collapsed-list');
+      if (mainSlot && mainSlot.firstElementChild) {
+        const oldMain = mainSlot.firstElementChild;
+        // avoid duplicating if oldMain is same as new card (unlikely)
+        if (oldMain !== card) {
+          // prepend old main into collapsed list so older items are deeper
+          collapsed.insertBefore(oldMain, collapsed.firstChild);
+        }
+      }
+      // set new main
+      if (mainSlot) {
+        // clear and append
+        mainSlot.innerHTML = '';
+        mainSlot.appendChild(card);
+        // recreate collapsed count and chevron if missing
+        let collapsedCountEl = mainSlot.querySelector('.collapsed-count');
+        if (!collapsedCountEl) {
+          collapsedCountEl = document.createElement('span');
+          collapsedCountEl.className = 'collapsed-count';
+          mainSlot.appendChild(collapsedCountEl);
+        }
+        collapsedCountEl.textContent = String(collapsed.children.length);
+        if (!mainSlot.querySelector('.expand-chevron')) {
+          const chevron = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+          chevron.setAttribute('viewBox', '0 0 24 24');
+          chevron.setAttribute('class', 'expand-chevron');
+          chevron.setAttribute('aria-hidden', 'true');
+          chevron.setAttribute('width', '14');
+          chevron.setAttribute('height', '14');
+          chevron.innerHTML = '<polyline points="6 9 12 15 18 9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>';
+          mainSlot.appendChild(chevron);
+        }
+      }
+      // move group to top since it's the most recently updated for this participant
+      insertGroupAtTop(group);
+    }
   }
 
   function appendEmptyPlayerCard(playerName) {
