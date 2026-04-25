@@ -31,18 +31,10 @@ const state = {
 state.eventDetails = {};
 
 function broadcast(message) {
-  try {
-    const data = JSON.stringify(message);
-    // debug log when broadcasting updates
-    if (message && message.type === 'update') {
-      try { console.log('Broadcasting update: tournamentName=', state.tournamentName, 'eventName=', state.eventName, 'selectedParticipants=', (state.selectedParticipants || []).length); } catch (e) {}
-    }
-    wss.clients.forEach((client) => {
-      if (client.readyState === WebSocket.OPEN) client.send(data);
-    });
-  } catch (e) {
-    console.error('broadcast error', e && e.stack || e);
-  }
+  const data = JSON.stringify(message);
+  wss.clients.forEach((client) => {
+    if (client.readyState === WebSocket.OPEN) client.send(data);
+  });
 }
 
 function buildParticipantToEntrant() {
@@ -78,8 +70,6 @@ wss.on('connection', (ws, req) => {
           console.log('Search result (summary):', Object.keys(res || {}));
           state.query = obj.payload;
           state.results = res;
-          // expose a simple tournamentName for clients
-          try { state.tournamentName = (res && res.tournament && res.tournament.name) ? String(res.tournament.name) : null; } catch(e) { state.tournamentName = null; }
           buildParticipantToEntrant();
           broadcast({ type: 'update', state });
         }).catch((err) => {
@@ -93,15 +83,6 @@ wss.on('connection', (ws, req) => {
         const ev = (obj.payload && obj.payload.event) || null;
         state.selectedParticipants = Array.isArray(sel) ? sel : [];
         state.selectedEvent = ev;
-        // try to resolve a human-friendly event name from current results
-        try {
-          state.eventName = null;
-          if (state.results && state.results.tournament) {
-            const evs = Array.isArray(state.results.tournament.events) ? state.results.tournament.events : ((state.results.tournament.events && state.results.tournament.events.nodes) || []);
-            const found = evs.find(x => x && (String(x.id) === String(ev) || x.slug === ev || x.name === ev));
-            if (found && found.name) state.eventName = String(found.name);
-          }
-        } catch (e) { state.eventName = state.eventName || null; }
         broadcast({ type: 'update', state });
         // fetch event details (sets/phaseGroups) asynchronously so overlay can render match info
         if (ev) {
@@ -109,8 +90,6 @@ wss.on('connection', (ws, req) => {
               if (details) {
                 state.eventDetails = state.eventDetails || {};
                 state.eventDetails[ev] = details;
-                // expose event name at top-level for clients
-                try { state.eventName = details && details.name ? String(details.name) : state.eventName || null; } catch(e) { /* ignore */ }
 
                 // Normalize sets into per-participant quick lookup for client simplicity
                 try {
@@ -213,7 +192,7 @@ wss.on('connection', (ws, req) => {
                       const scoreText = (myScore !== null && oppScore !== null) ? (String(myScore) + ' - ' + String(oppScore)) : (started ? (completed ? 'COMPLETED' : 'IN PROGRESS') : null);
 
                       const displayName = gamerTag || entrantName || (participantId ? String(participantId) : null);
-                      const entry = {
+                        const entry = {
                         displayName,
                         bracket,
                         pool,
@@ -221,6 +200,7 @@ wss.on('connection', (ws, req) => {
                         started,
                         completed,
                         scoreText,
+                          games: set.games || null,
                         opponent: opponentName,
                         setId: set.id,
                         entrantId: entrantId || null,
@@ -233,15 +213,42 @@ wss.on('connection', (ws, req) => {
                       }
 
                       // store under multiple keys for flexible lookup
+                      // store arrays of entries per key so we can render all matches for a participant
                       [[participantId], [gamerTag], [entrantId], [entrantName], [displayName]].forEach(arr => {
                         const k = (arr[0] == null) ? null : String(arr[0]).toLowerCase();
                         if (!k) return;
-                        // prefer earlier (more recent) sets because we iterated reversed
-                        if (!norm[k]) norm[k] = entry;
+                        if (!norm[k]) norm[k] = [];
+                        // avoid duplicate set entries for same setId
+                        if (!norm[k].some(x => x && x.setId === entry.setId)) {
+                          norm[k].push(entry);
+                        }
                       });
                     });
                   });
                   state.normalizedEventDetails[ev] = norm;
+                  // Build a map of matches keyed by entrantId (and participantId) for easy client-side rendering
+                  try {
+                    const matchesByEntrant = {};
+                    Object.keys(norm || {}).forEach(k => {
+                      const arr = Array.isArray(norm[k]) ? norm[k] : [norm[k]];
+                      arr.forEach(entry => {
+                        if (!entry) return;
+                        // prefer entrantId key
+                        if (entry.entrantId) {
+                          matchesByEntrant[entry.entrantId] = matchesByEntrant[entry.entrantId] || [];
+                          if (!matchesByEntrant[entry.entrantId].some(x => x && x.setId === entry.setId)) matchesByEntrant[entry.entrantId].push(entry);
+                        }
+                        // also index by participantId if available
+                        if (entry.participantId) {
+                          matchesByEntrant[entry.participantId] = matchesByEntrant[entry.participantId] || [];
+                          if (!matchesByEntrant[entry.participantId].some(x => x && x.setId === entry.setId)) matchesByEntrant[entry.participantId].push(entry);
+                        }
+                      });
+                    });
+                    // attach map to normalized event details
+                    state.normalizedEventDetails[ev]._matchesByEntrant = matchesByEntrant;
+                    if (Object.keys(matchesByEntrant).length) console.log('matchesByEntrant sample for', ev, Object.keys(matchesByEntrant).slice(0,5));
+                  } catch (e) { console.warn('could not build matchesByEntrant', e && e.stack || e); }
                   // build a participant->entrant map for this event from entrantLookup
                   try {
                     const participantMap = {};

@@ -59,60 +59,127 @@
   if (lastResults) renderParticipants({ results: lastResults, selectedParticipants: lastSelected, selectedEvent: lastEvent });
 
   function updateSelectionDisplay(selIds) {
-    const el = document.getElementById('currentSelection');
-    if (!el) return;
-    if (!selIds || selIds.length === 0) { el.textContent = 'Current: none'; return; }
+    const countEl = document.getElementById('selectedCount');
+    const curEl = document.getElementById('currentSelection');
     const participantsSelect = document.getElementById('participantsSelect');
-    const options = participantsSelect ? Array.from(participantsSelect.options) : [];
-    const labels = selIds.map(id => {
+    let options = [];
+    if (participantsSelect) {
+      if (participantsSelect.options) {
+        options = Array.from(participantsSelect.options);
+      } else {
+        const menu = participantsSelect.querySelector && participantsSelect.querySelector('.multiselect-menu');
+        if (menu) {
+          options = Array.from(menu.querySelectorAll('.ms-item')).map(item => {
+            const cb = item.querySelector('.ms-checkbox');
+            const span = item.querySelector('span');
+            return { value: cb ? cb.dataset.id : (span ? span.textContent : ''), textContent: span ? span.textContent : '' };
+          });
+        }
+      }
+    }
+    const labels = (selIds || []).map(id => {
       const opt = options.find(o => o.value === id);
       return opt ? opt.textContent : id;
-    });
-    el.textContent = 'Current: ' + labels.join(', ');
+    }).filter(Boolean);
+    // update count pill
+    const count = (selIds && selIds.length) ? selIds.length : 0;
+    if (countEl) countEl.textContent = count + ' selected';
+    // restore currentSelection behavior showing labels or 'none'
+    if (!curEl) return;
+    if (!labels || labels.length === 0) {
+      curEl.textContent = 'Current: none';
+      curEl.removeAttribute('title');
+      return;
+    }
+    curEl.textContent = 'Current: ' + labels.join(', ');
+    curEl.title = labels.join(', ');
   }
 
   function renderParticipants(state) {
     const eventsSelect = document.getElementById('eventsSelect');
     const participantsSelect = document.getElementById('participantsSelect');
+    const participantsMenu = participantsSelect && participantsSelect.querySelector('.multiselect-menu');
     const selected = (state.selectedParticipants || []);
     // If we don't have results yet, keep the current UI intact.
     if (!state.results || !state.results.tournament) return;
     // Only rebuild the events list when new results arrive
     const t = state.results.tournament;
     const events = Array.isArray(t.events) ? t.events : (t.events && t.events.nodes) || [];
-    // preserve current selection value if any
-    const curEvent = eventsSelect.value || state.selectedEvent || null;
-    eventsSelect.innerHTML = '<option value="">-- choose event --</option>';
-    events.forEach(ev => {
-      const opt = document.createElement('option');
-      opt.value = ev.id || ev.slug || ev.name;
-      opt.textContent = ev.name || opt.value;
-      eventsSelect.appendChild(opt);
-    });
-    // restore previous event selection if it still exists
-    if (curEvent) {
-      const exists = Array.from(eventsSelect.options).some(o => o.value === curEvent);
-      if (exists) eventsSelect.value = curEvent;
-    }
-    // when event changes, populate participants
-    eventsSelect.onchange = () => {
-      const evId = eventsSelect.value;
-      lastEvent = evId;
-      try { localStorage.setItem('sgg_event', String(lastEvent)); } catch(e){}
-      populateParticipantsForEvent(evId, events, participantsSelect, selected);
-    };
-    // if an event is selected (or stored), (re)populate participants
-    const useEvent = eventsSelect.value || state.selectedEvent || lastEvent;
-    if (useEvent) {
-      eventsSelect.value = useEvent;
-      populateParticipantsForEvent(useEvent, events, participantsSelect, selected);
+    // support both native <select> and our single-select dropdown
+    if (eventsSelect && eventsSelect.options) {
+      // native select path (backwards compat)
+      const curEvent = eventsSelect.value || state.selectedEvent || null;
+      eventsSelect.innerHTML = '<option value="">-- choose event --</option>';
+      events.forEach(ev => {
+        const opt = document.createElement('option');
+        opt.value = ev.id || ev.slug || ev.name;
+        opt.textContent = ev.name || opt.value;
+        eventsSelect.appendChild(opt);
+      });
+      if (curEvent) {
+        const exists = Array.from(eventsSelect.options).some(o => o.value === curEvent);
+        if (exists) eventsSelect.value = curEvent;
+      }
+      eventsSelect.onchange = () => {
+        const evId = eventsSelect.value;
+        lastEvent = evId;
+        try { localStorage.setItem('sgg_event', String(lastEvent)); } catch(e){}
+        populateParticipantsForEvent(evId, events, participantsSelect, selected);
+      };
+      const useEvent = eventsSelect.value || state.selectedEvent || lastEvent;
+      if (useEvent) {
+        eventsSelect.value = useEvent;
+        populateParticipantsForEvent(useEvent, events, participantsSelect, selected);
+      }
+    } else if (eventsSelect) {
+      // custom single-select dropdown path
+      const toggle = eventsSelect.querySelector('.multiselect-toggle');
+      const menu = eventsSelect.querySelector('.multiselect-menu');
+      // build menu items
+      menu.innerHTML = '';
+      events.forEach(ev => {
+        const id = ev.id || ev.slug || ev.name;
+        const label = ev.name || id;
+        const item = document.createElement('div');
+        item.className = 'ms-item';
+        item.dataset.id = id;
+        item.textContent = label;
+        item.addEventListener('click', () => {
+          lastEvent = id;
+          try { localStorage.setItem('sgg_event', String(lastEvent)); } catch(e){}
+          // update toggle label
+          const labelEl = toggle.querySelector('.multiselect-label');
+          if (labelEl) labelEl.textContent = label;
+          // mark selected item
+          Array.from(menu.querySelectorAll('.ms-item')).forEach(i => i.classList.toggle('selected', i === item));
+          // close menu
+          menu.hidden = true;
+          toggle.classList.remove('open');
+          // populate participants for the chosen event
+          populateParticipantsForEvent(id, events, participantsSelect, selected);
+        });
+        menu.appendChild(item);
+      });
+      // restore previously selected event
+      const useEvent = state.selectedEvent || lastEvent || null;
+      if (useEvent) {
+        const match = Array.from(menu.querySelectorAll('.ms-item')).find(i => i.dataset.id == useEvent);
+        if (match) {
+          match.classList.add('selected');
+          const labelEl = toggle.querySelector('.multiselect-label');
+          if (labelEl) labelEl.textContent = match.textContent;
+          populateParticipantsForEvent(useEvent, events, participantsSelect, selected);
+        }
+      }
     }
     // show current selection
     updateSelectionDisplay(selected);
   }
 
   function populateParticipantsForEvent(evId, events, participantsSelect, selected) {
-    participantsSelect.innerHTML = '';
+    const menu = participantsSelect && participantsSelect.querySelector('.multiselect-menu');
+    if (!menu) return;
+    menu.innerHTML = '';
     if (!evId) return;
     const ev = events.find(e => (e.id || e.slug || e.name) == evId);
     if (!ev) return;
@@ -122,8 +189,6 @@
       const parts = (ent.participants && (Array.isArray(ent.participants) ? ent.participants : ent.participants.nodes)) || [];
       if (parts.length) {
         parts.forEach(p => {
-          // prefer entrant id as the option value because normalized data uses entrant ids
-          // use explicit entrant id when available to align control -> server mapping
           const id = ent.id || p.id || p.gamerTag || ent.name;
           const label = (p.gamerTag || (p.player && p.player.id) || ent.name || id);
           if (!seen.has(id)) seen.set(id, label);
@@ -135,41 +200,146 @@
       }
     });
     seen.forEach((label, id) => {
-      const opt = document.createElement('option');
-      opt.value = id;
-      opt.textContent = label + ' (' + id + ')';
-      if (selected.includes(id)) opt.selected = true;
-      participantsSelect.appendChild(opt);
+      const item = document.createElement('label');
+      item.className = 'ms-item';
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.className = 'ms-checkbox';
+      cb.dataset.id = id;
+      cb.checked = selected.includes(id);
+      cb.addEventListener('change', () => {
+        // update lastSelected when checkbox toggles
+        const checked = Array.from(menu.querySelectorAll('.ms-checkbox:checked')).map(i => i.dataset.id);
+        lastSelected = checked;
+        updateSelectionDisplay(lastSelected);
+      });
+      const span = document.createElement('span');
+      span.textContent = label + ' (' + id + ')';
+      item.appendChild(cb);
+      item.appendChild(span);
+      menu.appendChild(item);
     });
     // after building participant options, refresh selection display so labels show
     updateSelectionDisplay(selected);
   }
 
   document.getElementById('applySelection').addEventListener('click', () => {
-    const participantsSelect = document.getElementById('participantsSelect');
-    const sel = Array.from(participantsSelect.selectedOptions).map(o => o.value);
-    const ev = document.getElementById('eventsSelect').value || lastEvent || null;
+    const menu = document.getElementById('participantsSelect').querySelector('.multiselect-menu');
+    const sel = menu ? Array.from(menu.querySelectorAll('.ms-checkbox:checked')).map(i => i.dataset.id) : [];
+    const eventsEl = document.getElementById('eventsSelect');
+    const ev = (eventsEl && eventsEl.options) ? (eventsEl.value || lastEvent || null) : (lastEvent || null);
     ws.send(JSON.stringify({ type: 'select', payload: { selected: sel, event: ev } }));
     lastSelected = sel;
     lastEvent = ev;
     try { localStorage.setItem('sgg_selected', JSON.stringify(lastSelected)); } catch (e) {}
     try { localStorage.setItem('sgg_event', String(lastEvent)); } catch (e) {}
     updateSelectionDisplay(sel);
+    // close the menu
+    const menuContainer = document.getElementById('participantsSelect');
+    const menuEl = menuContainer && menuContainer.querySelector('.multiselect-menu');
+    if (menuEl) {
+      menuEl.hidden = true;
+      menuEl.setAttribute('aria-hidden', 'true');
+    }
   });
 
   document.getElementById('clearSelection').addEventListener('click', () => {
-    const ev = document.getElementById('eventsSelect').value || lastEvent || null;
+    const eventsEl = document.getElementById('eventsSelect');
+    const ev = (eventsEl && eventsEl.options) ? (eventsEl.value || lastEvent || null) : (lastEvent || null);
     ws.send(JSON.stringify({ type: 'select', payload: { selected: [], event: ev } }));
     lastSelected = [];
     try { localStorage.setItem('sgg_selected', JSON.stringify(lastSelected)); } catch (e) {}
+    // uncheck all checkboxes
+    const menu = document.getElementById('participantsSelect').querySelector('.multiselect-menu');
+    if (menu) Array.from(menu.querySelectorAll('.ms-checkbox')).forEach(cb => cb.checked = false);
     updateSelectionDisplay([]);
   });
 
   // removed player search input — tournament-only workflow
 
   document.getElementById('btnTournament').addEventListener('click', () => {
-    const tournament = document.getElementById('tournament').value;
+    const tournament = (document.getElementById('tournament').value || '').trim();
+    if (!tournament) {
+      // clear event and participants UI
+      const eventsSelect = document.getElementById('eventsSelect');
+      const participantsSelect = document.getElementById('participantsSelect');
+      if (eventsSelect) {
+        if (eventsSelect.options) eventsSelect.innerHTML = '<option value="">-- choose event --</option>';
+        else {
+          const toggle = eventsSelect.querySelector('.multiselect-toggle');
+          const menu = eventsSelect.querySelector('.multiselect-menu');
+          if (toggle) {
+            const lbl = toggle.querySelector('.multiselect-label');
+            if (lbl) lbl.textContent = '-- choose event --';
+            toggle.classList.remove('open');
+          }
+          if (menu) menu.innerHTML = '';
+        }
+      }
+      if (participantsSelect) {
+        const menu = participantsSelect.querySelector('.multiselect-menu');
+        if (menu) menu.innerHTML = '';
+      }
+      // clear in-memory state
+      lastResults = null;
+      lastSelected = [];
+      lastEvent = null;
+      updateSelectionDisplay([]);
+      // clear localStorage keys used by the control
+      try {
+        localStorage.removeItem('sgg_results');
+        localStorage.removeItem('sgg_selected');
+        localStorage.removeItem('sgg_event');
+      } catch (e) {}
+      // notify server that selection is cleared
+      try { ws.send(JSON.stringify({ type: 'select', payload: { selected: [], event: null } })); } catch(e){}
+      return;
+    }
     ws.send(JSON.stringify({ type: 'search', payload: { tournament } }));
   });
+
+  // multiselect toggle behavior and outside click close
+  (function setupMultiselectToggle(){
+    const container = document.getElementById('participantsSelect');
+    if (!container) return;
+    const toggle = container.querySelector('.multiselect-toggle');
+    const menu = container.querySelector('.multiselect-menu');
+    toggle.addEventListener('click', () => {
+      const isHidden = menu.hidden;
+      menu.hidden = !isHidden;
+      menu.setAttribute('aria-hidden', String(menu.hidden));
+      // reflect open state on the toggle so the chevron can rotate
+      toggle.classList.toggle('open', !menu.hidden);
+      if (!menu.hidden) menu.querySelector('.ms-checkbox')?.focus();
+    });
+    document.addEventListener('click', (ev) => {
+      if (!container.contains(ev.target)) {
+        menu.hidden = true;
+        menu.setAttribute('aria-hidden', 'true');
+      }
+    });
+    // also wire the events single-select toggle if present
+    const eventsContainer = document.getElementById('eventsSelect');
+    if (eventsContainer) {
+      const evToggle = eventsContainer.querySelector('.multiselect-toggle');
+      const evMenu = eventsContainer.querySelector('.multiselect-menu');
+      if (evToggle && evMenu) {
+        evToggle.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const hidden = evMenu.hidden;
+          evMenu.hidden = !hidden;
+          evMenu.setAttribute('aria-hidden', String(evMenu.hidden));
+          evToggle.classList.toggle('open', !evMenu.hidden);
+        });
+        document.addEventListener('click', (ev) => {
+          if (!eventsContainer.contains(ev.target)) {
+            evMenu.hidden = true;
+            evMenu.setAttribute('aria-hidden', 'true');
+            evToggle.classList.remove('open');
+          }
+        });
+      }
+    }
+  })();
 
 })();

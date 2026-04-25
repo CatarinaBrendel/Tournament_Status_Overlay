@@ -1,324 +1,705 @@
-(function(){
-  const playersDiv = document.getElementById('players');
-  const ws = new WebSocket((location.protocol === 'https:' ? 'wss' : 'ws') + '://' + location.host);
+(function () {
+  const playersDiv = document.getElementById("players");
+
+  const wsUrl =
+    (location.protocol === "https:" ? "wss" : "ws") +
+    "://" +
+    location.host;
+
+  const ws = new WebSocket(wsUrl);
 
   function render(state) {
-    playersDiv.innerHTML = '';
+    playersDiv.innerHTML = "";
+
     if (!state) return;
-    const selected = Array.isArray(state.selectedParticipants) ? state.selectedParticipants : [];
+
+    const selected = Array.isArray(state.selectedParticipants)
+      ? state.selectedParticipants
+      : [];
+
     const selectedSet = new Set(selected.map(String));
-    const selectedLower = new Set(selected.map(s => String(s).toLowerCase()));
+    const selectedLower = new Set(selected.map((s) => String(s).toLowerCase()));
+
     const selectedEvent = state.selectedEvent || null;
-    const normalized = (state.normalizedEventDetails && state.selectedEvent) ? state.normalizedEventDetails[state.selectedEvent] : null;
 
-    // participant->entrant mapping: prefer server-provided mapping, fallback to building from state.results
-    let participantToEntrant = {};
-    if (state.participantToEntrant && Object.keys(state.participantToEntrant).length) {
-      participantToEntrant = state.participantToEntrant;
-      console.log('overlay: using server participantToEntrant');
-    } else if (state.results && state.results.tournament && state.results.tournament.events) {
-      try {
-        const evs = Array.isArray(state.results.tournament.events) ? state.results.tournament.events : ((state.results.tournament.events && state.results.tournament.events.nodes) || []);
-        evs.forEach(e => {
-          const entrants = e && e.entrants ? (Array.isArray(e.entrants) ? e.entrants : (e.entrants.nodes || [])) : [];
-          entrants.forEach(ent => {
-            const entId = ent && ent.id ? String(ent.id) : null;
-            const parts = ent && ent.participants ? (Array.isArray(ent.participants) ? ent.participants : (ent.participants.nodes || [])) : [];
-            parts.forEach(p => {
-              if (p && p.id && entId) participantToEntrant[String(p.id)] = entId;
-            });
-          });
-        });
-        console.log('overlay: built participantToEntrant from state.results');
-      } catch (e) { /* ignore */ }
-    }
-    console.log('overlay: participantToEntrant (final)', participantToEntrant);
+    const normalized =
+      state.normalizedEventDetails && state.selectedEvent
+        ? state.normalizedEventDetails[state.selectedEvent]
+        : null;
 
-    // Render header: tournament title (left) and event name (right) — show even before participants selected
-    try {
-      const header = document.createElement('div'); header.className = 'overlay-header';
-      const tName = (state.results && state.results.tournament && state.results.tournament.name) || state.tournamentName || '';
-      // resolve event name from results if possible
-      let eName = '';
-      try {
-        const t = state.results && state.results.tournament ? state.results.tournament : null;
-        const evs = t ? (Array.isArray(t.events) ? t.events : ((t.events && t.events.nodes) || [])) : [];
-        if (state.selectedEvent) {
-          const found = evs.find(x => x && (String(x.id) === String(state.selectedEvent) || x.slug === state.selectedEvent || x.name === state.selectedEvent));
-          if (found && found.name) eName = found.name;
-        }
-      } catch (e) { /* ignore */ }
-      eName = eName || state.eventName || '';
-      const left = document.createElement('div'); left.className = 'overlay-title'; left.textContent = tName || '';
-      const right = document.createElement('div'); right.className = 'overlay-event'; right.textContent = eName || '';
-      header.appendChild(left);
-      header.appendChild(right);
-      if (tName || eName) playersDiv.appendChild(header);
-    } catch (e) { console.warn('header render failed', e); }
+    const eventDetails =
+      state.eventDetails && state.selectedEvent
+        ? state.eventDetails[state.selectedEvent]
+        : null;
 
-    // If server mapping is empty but normalized data exists, build mapping from normalized entries
-    if (Object.keys(participantToEntrant).length === 0 && normalized && Object.keys(normalized).length) {
-      try {
-        Object.values(normalized).forEach(v => {
-          if (!v) return;
-          if (v.participantId && v.entrantId) participantToEntrant[String(v.participantId)] = String(v.entrantId);
-          // also if participantId missing but entrantId present, map entrantId->entrantId for convenience
-          if (!v.participantId && v.entrantId) participantToEntrant[String(v.entrantId)] = String(v.entrantId);
-        });
-        console.log('overlay: built participantToEntrant from normalized entries', participantToEntrant);
-      } catch (e) { /* ignore */ }
-    }
+    const participantToEntrant = buildParticipantToEntrantMap(
+      state,
+      normalized
+    );
 
-    // If server provided normalized data, render that first (works even without `state.results`)
-    if (normalized && Object.keys(normalized).length) {
-      // Tournament title (if available)
-      const title = document.createElement('div');
-      title.className = 'player';
-      title.style.fontWeight = '700';
-      title.textContent = 'Tournament: ' + ((state.results && state.results.tournament && state.results.tournament.name) || '');
-      playersDiv.appendChild(title);
-    }
-
-    const t = state.results && state.results.tournament ? state.results.tournament : null;
-    const events = t ? (Array.isArray(t.events) ? t.events : ((t.events && t.events.nodes) || [])) : [];
-    const eventsToShow = selectedEvent ? events.filter(ev => (ev.id || ev.slug || ev.name) == selectedEvent) : events;
-
-    function matchesSelected(candidates) {
-      for (let i=0;i<candidates.length;i++){
-        const c = candidates[i];
-        if (c != null && selectedSet.has(String(c))) return true;
-      }
-      return false;
-    }
-
-    const eventDetails = (state.eventDetails && state.selectedEvent) ? state.eventDetails[state.selectedEvent] : null;
+    renderHeader(state);
 
     if (normalized && Object.keys(normalized).length) {
-      // server provided per-participant normalized data; render one card per selected participant
-      console.log('overlay: normalized keys', Object.keys(normalized));
-      console.log('overlay: selected', selected);
-      console.log('overlay: participantToEntrant', participantToEntrant);
-      selected.forEach(function(sel){
-        const key = String(sel || '').toLowerCase();
-        let entry = normalized[key];
-        const fallbackName = String(sel || 'Player');
-        // fallback: try to find a normalized entry by mapping participant->entrant, displayName or opponent
-        if (!entry) {
-          const selLower = String(sel || '').toLowerCase();
-          // try mapping numeric participant id -> entrant id
-          if (participantToEntrant[String(sel)]) {
-            const mapped = participantToEntrant[String(sel)];
-            entry = normalized[String(mapped).toLowerCase()];
-          }
-          entry = entry || Object.values(normalized).find(v => {
-            if (!v) return false;
-            if (v.displayName && String(v.displayName).toLowerCase() === selLower) return true;
-            if (v.opponent && String(v.opponent).toLowerCase() === selLower) return true;
-            if (v.entrantId && String(v.entrantId) === String(sel)) return true;
-            if (v.participantId && String(v.participantId) === String(sel)) return true;
-            return false;
-          });
-          // extra aggressive matching: try matching keys or numeric-only ids
-          if (!entry) {
-            const digits = String(sel).replace(/\D/g, '');
-            entry = Object.keys(normalized).reduce((acc,k) => acc || ( (k === String(sel).toLowerCase() || k === digits) ? normalized[k] : null ), null);
-          }
-          if (!entry) {
-            entry = Object.values(normalized).find(v => {
-              if (!v) return false;
-              if (v.displayName && String(v.displayName).toLowerCase().includes(String(sel).toLowerCase())) return true;
-              if (v.opponent && String(v.opponent).toLowerCase().includes(String(sel).toLowerCase())) return true;
-              return false;
-            });
-          }
-          if (entry) console.log('overlay: matched selected', sel, 'to normalized entry via fallback');
-        }
-        if (entry) {
-          const card = document.createElement('div'); card.className = 'player';
-          const left = document.createElement('div'); left.className = 'left';
-          const name = document.createElement('div'); name.className = 'name'; name.textContent = entry.displayName || fallbackName;
-          left.appendChild(name);
-
-          const meta = document.createElement('div'); meta.className = 'meta';
-          meta.textContent = [ entry.bracket || '', entry.pool || '', entry.round || '' ].filter(Boolean).join(' • ');
-
-          const info = document.createElement('div'); info.className = 'small';
-          info.textContent = 'Started: ' + (entry.started ? 'yes' : 'no') + (entry.opponent ? (' • Opponent: ' + entry.opponent) : '');
-
-          const scoreWrap = document.createElement('div'); scoreWrap.className = 'score';
-          if (entry.scoreText) scoreWrap.textContent = entry.scoreText;
-          else { const pill = document.createElement('span'); pill.textContent = 'waiting'; pill.style.padding = '6px 10px'; pill.style.borderRadius = '999px'; pill.style.background = 'rgba(255,255,255,0.06)'; pill.style.color = '#fff'; pill.style.fontWeight = '700'; scoreWrap.appendChild(pill); }
-
-          card.appendChild(left);
-          const middle = document.createElement('div'); middle.appendChild(meta); middle.appendChild(info); card.appendChild(middle);
-          card.appendChild(scoreWrap);
-          playersDiv.appendChild(card);
-        }
+      renderNormalizedMatches({
+        normalized,
+        selected,
+        participantToEntrant
       });
-      // done — only matched selected entries render
-    } else if (eventDetails && eventDetails.sets && Array.isArray(eventDetails.sets.nodes)) {
-      const sets = eventDetails.sets.nodes;
-      // render one card per selected participant using set-level info when available (legacy)
-      sets.forEach(function(set){
-        const slots = set.slots || [];
-        // check if this set involves any selected participant
-        const intersects = slots.some(s => {
-          const cands = [];
-          if (s.participant && s.participant.id) cands.push(String(s.participant.id));
-          if (s.participant && s.participant.gamerTag) cands.push(String(s.participant.gamerTag));
-          if (s.entrant && s.entrant.id) cands.push(String(s.entrant.id));
-          if (s.entrant && s.entrant.name) cands.push(String(s.entrant.name));
-          for (const c of cands) {
-            if (!c) continue;
-            if (selectedSet.has(c)) return true;
-            if (selectedLower.has(c.toLowerCase())) return true;
-          }
-          return false;
-        });
-        if (!intersects) return;
 
-        const bracket = (set.phaseGroup && set.phaseGroup.name) || set.phaseGroupId || '';
-        const pool = (set.phaseGroup && (set.phaseGroup.identifier || set.phaseGroup.displayIdentifier || set.phaseGroup.name)) || '';
-        const round = set.fullRoundText || set.round || '';
-        const started = !!set.startedAt;
-        const completed = !!set.completedAt;
-
-        // determine entrant ids order to map scores
-        const slotEntrantIds = (set.slots || []).map(s => (s.entrant && s.entrant.id) || null);
-        const s1 = (typeof set.entrant1Score !== 'undefined') ? set.entrant1Score : null;
-        const s2 = (typeof set.entrant2Score !== 'undefined') ? set.entrant2Score : null;
-
-        // for each slot that matches a selected participant, render a card
-        (set.slots || []).forEach(function(s, idx){
-          const id = (s.participant && s.participant.id) || (s.entrant && s.entrant.id) || null;
-          const gid = (s.participant && s.participant.gamerTag) || (s.entrant && s.entrant.name) || null;
-          if (!id && !gid) return;
-          const isSelected = (id && (selectedSet.has(String(id)) || selectedLower.has(String(id).toLowerCase()))) || (gid && selectedLower.has(String(gid).toLowerCase()));
-          if (!isSelected) return;
-
-          const card = document.createElement('div'); card.className = 'player';
-          const left = document.createElement('div'); left.className = 'left';
-          const name = document.createElement('div'); name.className = 'name'; name.textContent = gid ? gid : (s.entrant && s.entrant.name) || String(id);
-          left.appendChild(name);
-
-          const meta = document.createElement('div'); meta.className = 'meta';
-          meta.textContent = [ bracket || '', pool || '', round || '' ].filter(Boolean).join(' • ');
-
-          const scoreWrap = document.createElement('div'); scoreWrap.className = 'score';
-          if (started) {
-            // show participant-specific score if available, otherwise generic in-progress
-            let myScore = null; let oppScore = null;
-            const entrantId = (s.entrant && s.entrant.id) || null;
-            if (entrantId && slotEntrantIds.length === 2) {
-              if (String(slotEntrantIds[0]) === String(entrantId)) { myScore = s1; oppScore = s2; }
-              else if (String(slotEntrantIds[1]) === String(entrantId)) { myScore = s2; oppScore = s1; }
-            }
-            if (myScore !== null && oppScore !== null) {
-              scoreWrap.textContent = String(myScore) + ' - ' + String(oppScore);
-            } else {
-              scoreWrap.textContent = completed ? 'COMPLETED' : 'IN PROGRESS';
-            }
-          } else {
-            const pill = document.createElement('span'); pill.textContent = 'waiting'; pill.style.padding = '6px 10px'; pill.style.borderRadius = '999px'; pill.style.background = 'rgba(255,255,255,0.06)'; pill.style.color = '#fff'; pill.style.fontWeight = '700'; scoreWrap.appendChild(pill);
-          }
-
-          card.appendChild(left);
-          const middle = document.createElement('div'); middle.appendChild(meta); card.appendChild(middle);
-          card.appendChild(scoreWrap);
-          playersDiv.appendChild(card);
-        });
-      });
-    } else {
-      eventsToShow.forEach(function(ev){
-        var entrants = [];
-        if (!ev.entrants) entrants = [];
-        else if (Array.isArray(ev.entrants)) entrants = ev.entrants;
-        else if (ev.entrants.nodes) entrants = ev.entrants.nodes;
-        else entrants = [ev.entrants];
-
-        var matchedParticipants = [];
-        entrants.forEach(function(ent){
-          var participantsList = [];
-          if (!ent.participants) participantsList = [];
-          else if (Array.isArray(ent.participants)) participantsList = ent.participants;
-          else if (ent.participants.nodes) participantsList = ent.participants.nodes;
-          else participantsList = [ent.participants];
-
-          if (participantsList.length) {
-            participantsList.forEach(function(p){
-              var candidates = [p.id, p.gamerTag, (p.player && p.player.id), ent.id, ent.name];
-              if (matchesSelected(candidates.map(function(c){ return c==null ? null : String(c); }))) {
-                var display = p.gamerTag || (p.player && p.player.id) || ent.name || String(p.id || '');
-                // collect extra metadata when available
-                var meta = {
-                  display: display,
-                  gamerTag: p.gamerTag || null,
-                  playerId: (p.player && p.player.id) || null,
-                  entrantId: ent.id || null,
-                  entrantName: ent.name || null,
-                  seed: ent.seed || ent.seedNum || ent.seedNo || null
-                };
-                matchedParticipants.push(meta);
-              }
-            });
-          } else {
-            var candidates = [ent.id, ent.name];
-            if (matchesSelected(candidates.map(function(c){ return c==null ? null : String(c); }))) {
-              matchedParticipants.push({ display: ent.name || String(ent.id || ''), entrantId: ent.id || null, entrantName: ent.name || null, seed: ent.seed || ent.seedNum || null });
-            }
-          }
-        });
-
-        if (matchedParticipants.length) {
-          var evTitle = document.createElement('div');
-          evTitle.className = 'player';
-          evTitle.style.fontStyle = 'italic';
-          evTitle.textContent = 'Event: ' + (ev.name || '');
-          playersDiv.appendChild(evTitle);
-
-          // render matched participants with metadata when available as cards
-          matchedParticipants.forEach(function(item){
-            var card = document.createElement('div'); card.className = 'player';
-            var left = document.createElement('div'); left.className = 'left';
-            var name = document.createElement('div'); name.className = 'name'; name.textContent = item.display || (item.entrantName || '') || String(item.entrantId || '');
-            left.appendChild(name);
-
-            var meta = document.createElement('div'); meta.className = 'meta';
-            var metaParts = [];
-            if (item.seed) metaParts.push('seed: ' + item.seed);
-            if (item.entrantName) metaParts.push(item.entrantName);
-            meta.textContent = metaParts.join(' • ');
-
-            var scoreWrap = document.createElement('div'); scoreWrap.className = 'score';
-            var pill = document.createElement('span'); pill.textContent = 'waiting'; pill.style.padding = '6px 10px'; pill.style.borderRadius = '999px'; pill.style.background = 'rgba(255,255,255,0.06)'; pill.style.color = '#fff'; pill.style.fontWeight = '700';
-            scoreWrap.appendChild(pill);
-
-            card.appendChild(left);
-            var middle = document.createElement('div'); middle.appendChild(meta); card.appendChild(middle);
-            card.appendChild(scoreWrap);
-            playersDiv.appendChild(card);
-          });
-        }
-      });
+      return;
     }
+
+    if (eventDetails && eventDetails.sets && Array.isArray(eventDetails.sets.nodes)) {
+      renderLegacySetMatches({
+        sets: eventDetails.sets.nodes,
+        selectedSet,
+        selectedLower
+      });
+
+      return;
+    }
+
+    renderFallbackEntrants({
+      state,
+      selectedEvent,
+      selectedSet,
+      selectedLower
+    });
   }
 
-  ws.addEventListener('open', function(){ console.log('WS open'); });
-  ws.addEventListener('message', function(ev){
+  function renderHeader(state) {
+    const tournamentName =
+      state?.results?.tournament?.name ||
+      state?.tournamentName ||
+      "";
+
+    const eventName = resolveEventName(state);
+
+    if (!tournamentName && !eventName) return;
+
+    const header = document.createElement("header");
+    header.className = "overlay-header";
+
+    const left = document.createElement("div");
+    left.className = "tournament-title";
+    left.textContent = tournamentName;
+
+    const right = document.createElement("div");
+    right.className = "event-title";
+    right.textContent = eventName;
+
+    header.appendChild(left);
+    header.appendChild(right);
+
+    playersDiv.appendChild(header);
+  }
+
+  function resolveEventName(state) {
+    let eventName = "";
+
     try {
-      const msg = JSON.parse(ev.data);
-      if (!msg) return;
-      if (msg.type === 'init' || msg.type === 'update') {
-        render(msg.state || {});
-      } else if (msg.type === 'error') {
-        console.warn('Server error:', msg.message || msg);
+      const tournament = state?.results?.tournament || null;
+      const events = tournament
+        ? Array.isArray(tournament.events)
+          ? tournament.events
+          : tournament.events?.nodes || []
+        : [];
+
+      if (state.selectedEvent) {
+        const found = events.find((event) => {
+          return (
+            event &&
+            (
+              String(event.id) === String(state.selectedEvent) ||
+              event.slug === state.selectedEvent ||
+              event.name === state.selectedEvent
+            )
+          );
+        });
+
+        if (found?.name) eventName = found.name;
       }
-    } catch (e) {
-      console.warn('Failed to parse WS message', e, ev.data);
+    } catch {
+      // Ignore malformed state.
+    }
+
+    return eventName || state.eventName || "";
+  }
+
+  function buildParticipantToEntrantMap(state, normalized) {
+    let participantToEntrant = {};
+
+    if (
+      state.participantToEntrant &&
+      Object.keys(state.participantToEntrant).length
+    ) {
+      participantToEntrant = { ...state.participantToEntrant };
+    } else {
+      participantToEntrant = buildParticipantToEntrantFromResults(state);
+    }
+
+    if (
+      Object.keys(participantToEntrant).length === 0 &&
+      normalized &&
+      Object.keys(normalized).length
+    ) {
+      Object.values(normalized).forEach((value) => {
+        if (!value) return;
+
+        if (value.participantId && value.entrantId) {
+          participantToEntrant[String(value.participantId)] = String(
+            value.entrantId
+          );
+        }
+
+        if (!value.participantId && value.entrantId) {
+          participantToEntrant[String(value.entrantId)] = String(
+            value.entrantId
+          );
+        }
+      });
+    }
+
+    return participantToEntrant;
+  }
+
+  function buildParticipantToEntrantFromResults(state) {
+    const participantToEntrant = {};
+
+    try {
+      const tournament = state?.results?.tournament || null;
+      const events = tournament
+        ? Array.isArray(tournament.events)
+          ? tournament.events
+          : tournament.events?.nodes || []
+        : [];
+
+      events.forEach((event) => {
+        const entrants = getNodes(event?.entrants);
+
+        entrants.forEach((entrant) => {
+          const entrantId = entrant?.id ? String(entrant.id) : null;
+          if (!entrantId) return;
+
+          const participants = getNodes(entrant?.participants);
+
+          participants.forEach((participant) => {
+            if (participant?.id) {
+              participantToEntrant[String(participant.id)] = entrantId;
+            }
+          });
+        });
+      });
+    } catch {
+      // Ignore malformed state.
+    }
+
+    return participantToEntrant;
+  }
+
+  function renderNormalizedMatches({ normalized, selected, participantToEntrant }) {
+    const matchesMap = normalized._matchesByEntrant || {};
+
+    selected.forEach((selectedValue) => {
+      const selectedString = String(selectedValue || "");
+
+      let entrantId = selectedString;
+
+      if (!matchesMap[entrantId] && participantToEntrant[selectedString]) {
+        entrantId = String(participantToEntrant[selectedString]);
+      }
+
+      let matches = matchesMap[entrantId] || [];
+
+      if ((!matches || matches.length === 0) && normalized[selectedString.toLowerCase()]) {
+        const maybe = normalized[selectedString.toLowerCase()];
+        matches = Array.isArray(maybe) ? maybe : [maybe];
+      }
+
+      if (!matches || matches.length === 0) {
+        const matchingKey = Object.keys(normalized || {}).find((key) => {
+          return key === selectedString || key === selectedString.toLowerCase();
+        });
+
+        if (matchingKey) {
+          matches = Array.isArray(normalized[matchingKey])
+            ? normalized[matchingKey]
+            : [normalized[matchingKey]];
+        }
+      }
+
+      if (!matches || matches.length === 0) {
+        appendEmptyPlayerCard(selectedString);
+        return;
+      }
+
+      matches.forEach((entry) => {
+        if (!entry) return;
+
+        const status = getNormalizedStatus(entry);
+        const score = formatNormalizedScore(entry);
+
+        appendMatchCard({
+          playerName: entry.displayName || selectedString || "Unknown",
+          round: entry.round || "",
+          bracket: entry.bracket || "",
+          pool: entry.pool || "",
+          opponent: entry.opponent || "",
+          status,
+          score
+        });
+      });
+    });
+  }
+
+  function renderLegacySetMatches({ sets, selectedSet, selectedLower }) {
+    sets.forEach((set) => {
+      const slots = Array.isArray(set.slots) ? set.slots : [];
+
+      const involvesSelected = slots.some((slot) => {
+        const candidates = getSlotCandidates(slot);
+
+        return candidates.some((candidate) => {
+          if (!candidate) return false;
+
+          const value = String(candidate);
+          return (
+            selectedSet.has(value) ||
+            selectedLower.has(value.toLowerCase())
+          );
+        });
+      });
+
+      if (!involvesSelected) return;
+
+      const bracket =
+        set.phaseGroup?.name ||
+        set.phaseGroupId ||
+        "";
+
+      const pool =
+        set.phaseGroup?.identifier ||
+        set.phaseGroup?.displayIdentifier ||
+        set.phaseGroup?.name ||
+        "";
+
+      const round =
+        set.fullRoundText ||
+        set.round ||
+        "";
+
+      const started = Boolean(set.startedAt);
+      const completed = Boolean(set.completedAt);
+
+      const slotEntrantIds = slots.map((slot) => {
+        return slot.entrant?.id || null;
+      });
+
+      const entrant1Score =
+        typeof set.entrant1Score !== "undefined"
+          ? set.entrant1Score
+          : null;
+
+      const entrant2Score =
+        typeof set.entrant2Score !== "undefined"
+          ? set.entrant2Score
+          : null;
+
+      slots.forEach((slot) => {
+        const id =
+          slot.participant?.id ||
+          slot.entrant?.id ||
+          null;
+
+        const gamerTag =
+          slot.participant?.gamerTag ||
+          slot.entrant?.name ||
+          null;
+
+        const selected = isSlotSelected(slot, selectedSet, selectedLower);
+
+        if (!selected) return;
+
+        const opponentSlot = slots.find((other) => other !== slot);
+
+        const opponent =
+          opponentSlot?.participant?.gamerTag ||
+          opponentSlot?.entrant?.name ||
+          "";
+
+        let status = "waiting";
+        let score = "—";
+
+        if (started) {
+          status = completed ? "done" : "live";
+
+          const entrantId = slot.entrant?.id || null;
+
+          let myScore = null;
+          let opponentScore = null;
+
+          if (entrantId && slotEntrantIds.length === 2) {
+            if (String(slotEntrantIds[0]) === String(entrantId)) {
+              myScore = entrant1Score;
+              opponentScore = entrant2Score;
+            } else if (String(slotEntrantIds[1]) === String(entrantId)) {
+              myScore = entrant2Score;
+              opponentScore = entrant1Score;
+            }
+          }
+
+          if (myScore !== null && opponentScore !== null) {
+            score = `${myScore}–${opponentScore}`;
+          } else {
+            score = completed ? "DONE" : "LIVE";
+          }
+        }
+
+        appendMatchCard({
+          playerName: gamerTag || String(id || "Unknown"),
+          round,
+          bracket,
+          pool,
+          opponent,
+          status,
+          score
+        });
+      });
+    });
+  }
+
+  function renderFallbackEntrants({
+    state,
+    selectedEvent,
+    selectedSet,
+    selectedLower
+  }) {
+    const tournament = state?.results?.tournament || null;
+
+    const events = tournament
+      ? Array.isArray(tournament.events)
+        ? tournament.events
+        : tournament.events?.nodes || []
+      : [];
+
+    const eventsToShow = selectedEvent
+      ? events.filter((event) => {
+          return (
+            String(event.id || "") === String(selectedEvent) ||
+            event.slug === selectedEvent ||
+            event.name === selectedEvent
+          );
+        })
+      : events;
+
+    eventsToShow.forEach((event) => {
+      const entrants = getNodes(event?.entrants);
+
+      entrants.forEach((entrant) => {
+        const participants = getNodes(entrant?.participants);
+
+        if (participants.length) {
+          participants.forEach((participant) => {
+            const candidates = [
+              participant.id,
+              participant.gamerTag,
+              participant.player?.id,
+              entrant.id,
+              entrant.name
+            ];
+
+            if (!matchesSelected(candidates, selectedSet, selectedLower)) {
+              return;
+            }
+
+            const displayName =
+              participant.gamerTag ||
+              entrant.name ||
+              String(participant.id || entrant.id || "Unknown");
+
+            appendMatchCard({
+              playerName: displayName,
+              round: "Waiting for bracket data",
+              bracket: event.name || "",
+              pool: "",
+              opponent: "",
+              status: "waiting",
+              score: "—"
+            });
+          });
+        } else {
+          const candidates = [entrant.id, entrant.name];
+
+          if (!matchesSelected(candidates, selectedSet, selectedLower)) {
+            return;
+          }
+
+          appendMatchCard({
+            playerName: entrant.name || String(entrant.id || "Unknown"),
+            round: "Waiting for bracket data",
+            bracket: event.name || "",
+            pool: "",
+            opponent: "",
+            status: "waiting",
+            score: "—"
+          });
+        }
+      });
+    });
+  }
+
+  function appendMatchCard({
+    playerName,
+    round,
+    bracket,
+    pool,
+    opponent,
+    status,
+    score
+  }) {
+    const safeStatus = status || "waiting";
+    const safeScore = score || "—";
+
+    const card = document.createElement("article");
+    card.className = `match-card match-${safeStatus}`;
+
+    const player = document.createElement("div");
+    player.className = "player-name";
+    player.textContent = playerName || "Unknown";
+
+    const roundInfo = document.createElement("div");
+    roundInfo.className = "round-info";
+
+    const roundName = document.createElement("div");
+    roundName.className = "round-name";
+    roundName.textContent = round || "Unknown round";
+
+    const meta = document.createElement("div");
+    meta.className = "meta";
+    meta.textContent = [bracket, pool].filter(Boolean).join(" • ");
+
+    roundInfo.appendChild(roundName);
+
+    if (meta.textContent) {
+      roundInfo.appendChild(meta);
+    }
+
+    const statusPill = document.createElement("div");
+    statusPill.className = `status-pill status-${safeStatus}`;
+    statusPill.textContent = statusLabel(safeStatus);
+
+    const opponentElement = document.createElement("div");
+    opponentElement.className = "opponent";
+
+    if (opponent) {
+      const prefix = document.createTextNode("vs ");
+      const strong = document.createElement("strong");
+      strong.textContent = opponent;
+
+      opponentElement.appendChild(prefix);
+      opponentElement.appendChild(strong);
+    } else {
+      opponentElement.textContent = "Opponent TBD";
+    }
+
+    const scoreElement = document.createElement("div");
+    scoreElement.className = `score ${scoreClass(safeScore)}`;
+    scoreElement.textContent = safeScore;
+
+    // Assemble columns: player | round-info (includes status + opponent) | score
+    // Put status and opponent inside the roundInfo column
+    const metaRow = document.createElement('div');
+    metaRow.style.display = 'flex';
+    metaRow.style.alignItems = 'center';
+    metaRow.style.justifyContent = 'space-between';
+    metaRow.style.gap = '12px';
+    // left side: opponent
+    const left = document.createElement('div');
+    left.style.flex = '1';
+    left.appendChild(opponentElement);
+    metaRow.appendChild(left);
+
+    // ensure roundInfo contains roundName, meta, then metaRow
+    if (meta.textContent) {
+      // meta (bracket/pool) already appended earlier; ensure order
+      // append metaRow after meta
+      roundInfo.appendChild(metaRow);
+    } else {
+      // no meta, still append metaRow so opponent/status show
+      roundInfo.appendChild(metaRow);
+    }
+
+    // create score column containing score and status beneath
+    const scoreCol = document.createElement('div');
+    scoreCol.className = 'score-col';
+    scoreCol.appendChild(scoreElement);
+    scoreCol.appendChild(statusPill);
+
+    // Append in column order: player | roundInfo | scoreCol
+    card.appendChild(player);
+    card.appendChild(roundInfo);
+    card.appendChild(scoreCol);
+
+    playersDiv.appendChild(card);
+  }
+
+  function appendEmptyPlayerCard(playerName) {
+    appendMatchCard({
+      playerName,
+      round: "No match data",
+      bracket: "",
+      pool: "",
+      opponent: "",
+      status: "waiting",
+      score: "—"
+    });
+  }
+
+  function getNormalizedStatus(entry) {
+    if (!entry.started) return "waiting";
+
+    const score = String(entry.scoreText || "").toLowerCase();
+
+    if (
+      entry.completed ||
+      score.includes("completed") ||
+      score.match(/\d+\s*[-–]\s*\d+/)
+    ) {
+      return "done";
+    }
+
+    return "live";
+  }
+
+  function formatNormalizedScore(entry) {
+    if (entry.scoreText) {
+      return String(entry.scoreText).replace(/\s*-\s*/g, "–");
+    }
+
+    if (entry.games && Array.isArray(entry.games) && entry.games.length) {
+      return entry.games
+        .map((game, index) => {
+          return `G${index + 1}:${game.winnerId || game.winner || "?"}`;
+        })
+        .join(" ");
+    }
+
+    return "—";
+  }
+
+  function scoreClass(scoreText) {
+    const score = String(scoreText || "");
+
+    const match = score.match(/(\d+)\s*[–-]\s*(\d+)/);
+
+    if (!match) return "score-empty";
+
+    const mine = Number(match[1]);
+    const theirs = Number(match[2]);
+
+    if (mine > theirs) return "score-win";
+    if (mine < theirs) return "score-loss";
+
+    return "score-empty";
+  }
+
+  function statusLabel(status) {
+    if (status === "live") return "LIVE";
+    if (status === "done") return "DONE";
+    return "WAITING";
+  }
+
+  function getSlotCandidates(slot) {
+    return [
+      slot?.participant?.id,
+      slot?.participant?.gamerTag,
+      slot?.participant?.player?.id,
+      slot?.entrant?.id,
+      slot?.entrant?.name
+    ];
+  }
+
+  function isSlotSelected(slot, selectedSet, selectedLower) {
+    const candidates = getSlotCandidates(slot);
+
+    return candidates.some((candidate) => {
+      if (!candidate) return false;
+
+      const value = String(candidate);
+
+      return (
+        selectedSet.has(value) ||
+        selectedLower.has(value.toLowerCase())
+      );
+    });
+  }
+
+  function matchesSelected(candidates, selectedSet, selectedLower) {
+    return candidates.some((candidate) => {
+      if (candidate == null) return false;
+
+      const value = String(candidate);
+
+      return (
+        selectedSet.has(value) ||
+        selectedLower.has(value.toLowerCase())
+      );
+    });
+  }
+
+  function getNodes(value) {
+    if (!value) return [];
+    if (Array.isArray(value)) return value;
+    if (Array.isArray(value.nodes)) return value.nodes;
+    return [value];
+  }
+
+  ws.addEventListener("open", function () {
+    console.log("Overlay WebSocket open");
+  });
+
+  ws.addEventListener("message", function (event) {
+    try {
+      const message = JSON.parse(event.data);
+
+      if (!message) return;
+
+      if (message.type === "init" || message.type === "update") {
+        render(message.state || {});
+      } else if (message.type === "error") {
+        console.warn("Server error:", message.message || message);
+      }
+    } catch (error) {
+      console.warn("Failed to parse WebSocket message", error, event.data);
     }
   });
 
-  // expose a simple ping render if server doesn't send init immediately
-  setTimeout(()=>{ if (!playersDiv.innerHTML) render({}); }, 600);
+  ws.addEventListener("close", function () {
+    console.warn("Overlay WebSocket closed");
+    renderDisconnected();
+  });
 
+  ws.addEventListener("error", function (error) {
+    console.warn("Overlay WebSocket error", error);
+  });
+
+  function renderDisconnected() {
+    playersDiv.innerHTML = "";
+
+    appendMatchCard({
+      playerName: "Overlay",
+      round: "Disconnected from server",
+      bracket: "",
+      pool: "",
+      opponent: "",
+      status: "waiting",
+      score: "—"
+    });
+  }
+
+  setTimeout(function () {
+    if (!playersDiv.innerHTML) {
+      render({});
+    }
+  }, 600);
 })();

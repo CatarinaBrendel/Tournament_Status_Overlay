@@ -2,30 +2,97 @@
 <html>
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>StartGG Overlay Control</title>
-    <link rel="stylesheet" href="control.css">
+    <link rel="stylesheet" href="control.css" />
   </head>
-  <body>
-    <h1>Overlay Control</h1>
-    <div style="margin-top:8px">
-      <label>Tournament slug or URL: <input id="tournament" placeholder="tournament slug or full URL (e.g. https://www.start.gg/tournament/evo-2024/details)" /></label>
-      <button id="btnTournament">Load Tournament</button>
-    </div>
 
-    <div id="status" style="margin-bottom:8px;color:gray">Status: disconnected</div>
-    <div style="margin-top:12px">
-      <label>Event: <select id="eventsSelect"><option value="">-- choose event --</option></select></label>
+  <body>
+    <div class="app-shell">
+      <main class="control-card">
+        <header class="page-header">
+          <div class="header-title">
+            <h1>Overlay Control</h1>
+            <div id="status" class="status-badge is-disconnected">
+              <span class="status-dot"></span>
+              Status: disconnected
+            </div>
+          </div>
+          <p>Manage the tournament, event, and players shown in the OBS overlay.</p>
+        </header>
+
+        <section class="panel-section">
+          <label class="field">
+            <span class="field-label">Tournament slug or URL</span>
+
+            <div class="input-row">
+              <input
+                id="tournament"
+                placeholder="tournament slug or full URL, e.g. https://www.start.gg/tournament/evo-2024/details"
+              />
+
+              <button id="btnTournament" class="button primary">
+                Load Tournament
+              </button>
+            </div>
+          </label>
+
+          <label class="field">
+            <span class="field-label">Event</span>
+
+            <div id="eventsSelect" class="multiselect single-select">
+              <button type="button" class="multiselect-toggle single-toggle">
+                <span class="multiselect-label">-- choose event --</span>
+                <svg class="chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                  <polyline points="6 9 12 15 18 9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                </svg>
+              </button>
+              <div class="multiselect-menu single-menu" hidden aria-hidden="true"></div>
+            </div>
+          </label>
+        </section>
+
+        <section class="panel-section">
+          <div class="section-header">
+            <div>
+              <h2>Participants</h2>
+              <p>Select the players that should be visible in the overlay.</p>
+            </div>
+
+            <span class="count-pill" id="selectedCount">0 selected</span>
+          </div>
+
+          <label class="field">
+            <span class="field-label">Available participants</span>
+
+            <div id="participantsSelect" class="multiselect">
+                <button type="button" class="multiselect-toggle">
+                  <span class="multiselect-label">Select participants</span>
+                  <svg class="chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                    <polyline points="6 9 12 15 18 9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                  </svg>
+                </button>
+              <div class="multiselect-menu" hidden aria-hidden="true"></div>
+            </div>
+          </label>
+
+          <div id="currentSelection" class="current-selection">
+            Current: none
+          </div>
+        </section>
+
+        <footer class="action-bar">
+          <button id="clearSelection" class="button secondary">
+            Clear
+          </button>
+
+          <button id="applySelection" class="button primary">
+            Update OBS Overlay
+          </button>
+        </footer>
+      </main>
     </div>
-    <div style="margin-top:8px">
-      <label>Participants (multi-select): <select id="participantsSelect" multiple size="10" style="min-width:320px"></select></label>
-    </div>
-    <div style="margin-top:8px">
-      <button id="applySelection">Show Selected</button>
-      <button id="clearSelection">Clear</button>
-    </div>
-    <div id="currentSelection" style="margin-top:8px;color:blue">Current: none</div>
 
     <script src="control.js" defer></script>
   </body>
- </html>
+</html>

@@ -6,20 +6,12 @@
     <title>StartGG Overlay</title>
     <link rel="stylesheet" href="overlay.css">
   </head>
+
   <body>
     <div class="overlay">
       <div id="players"></div>
     </div>
+
     <script src="overlay.js" defer></script>
-          } catch (e) {
-            console.warn('Failed to parse WS message', e, ev.data);
-          }
-        });
-
-        // expose a simple ping render if server doesn't send init immediately
-        setTimeout(()=>{ if (!playersDiv.innerHTML) render({}); }, 600);
-
-      })();
-    </script>
   </body>
 </html>
